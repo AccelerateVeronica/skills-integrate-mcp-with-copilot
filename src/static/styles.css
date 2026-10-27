@@ -134,6 +134,10 @@ section h3 {
   margin-bottom: 15px;
 }
 
+.login-status {
+  margin-top: 15px;
+}
+
 .form-group label {
   display: block;
   margin-bottom: 5px;
