@@ -3,6 +3,35 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const loginForm = document.getElementById("login-form");
+  const loginStatus = document.getElementById("login-status");
+  const logoutButton = document.getElementById("logout-button");
+  const signupContainer = document.getElementById("signup-container");
+  let isTeacher = false;
+
+  function escapeHTML(value) {
+    return String(value).replace(/[&<>"']/g, (character) => {
+      const entities = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      };
+      return entities[character];
+    });
+  }
+
+  function updateTeacherUI(authenticated) {
+    isTeacher = authenticated;
+    loginForm.classList.toggle("hidden", authenticated);
+    logoutButton.classList.toggle("hidden", !authenticated);
+    signupContainer.classList.toggle("hidden", !authenticated);
+    loginStatus.className = "login-status";
+    loginStatus.textContent = authenticated
+      ? "You are logged in as a teacher."
+      : "Log in as a teacher to manage student registrations.";
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -12,6 +41,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      activitySelect.replaceChildren(activitySelect.options[0]);
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -29,8 +59,14 @@ document.addEventListener("DOMContentLoaded", () => {
               <ul class="participants-list">
                 ${details.participants
                   .map(
-                    (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                    (email) => `<li>
+                      <span class="participant-email">${escapeHTML(email)}</span>
+                      ${
+                        isTeacher
+                          ? `<button class="delete-btn" type="button" data-activity="${escapeHTML(name)}" data-email="${escapeHTML(email)}" aria-label="Unregister ${escapeHTML(email)}">Unregister</button>`
+                          : ""
+                      }
+                    </li>`
                   )
                   .join("")}
               </ul>
@@ -38,9 +74,9 @@ document.addEventListener("DOMContentLoaded", () => {
             : `<p><em>No participants yet</em></p>`;
 
         activityCard.innerHTML = `
-          <h4>${name}</h4>
-          <p>${details.description}</p>
-          <p><strong>Schedule:</strong> ${details.schedule}</p>
+          <h4>${escapeHTML(name)}</h4>
+          <p>${escapeHTML(details.description)}</p>
+          <p><strong>Schedule:</strong> ${escapeHTML(details.schedule)}</p>
           <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
           <div class="participants-container">
             ${participantsHTML}
@@ -69,7 +105,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Handle unregister functionality
   async function handleUnregister(event) {
-    const button = event.target;
+    const button = event.currentTarget;
     const activity = button.getAttribute("data-activity");
     const email = button.getAttribute("data-email");
 
@@ -109,6 +145,54 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Error unregistering:", error);
     }
   }
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(loginForm);
+
+    try {
+      const response = await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: formData.get("username"),
+          password: formData.get("password"),
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        loginStatus.textContent = result.detail || "Unable to log in.";
+        loginStatus.className = "login-status error";
+        return;
+      }
+
+      loginForm.reset();
+      updateTeacherUI(true);
+      loginStatus.className = "login-status success";
+      await fetchActivities();
+    } catch (error) {
+      loginStatus.textContent = "Unable to log in. Please try again.";
+      loginStatus.className = "login-status error";
+      console.error("Error logging in:", error);
+    }
+  });
+
+  logoutButton.addEventListener("click", async () => {
+    try {
+      const response = await fetch("/auth/logout", { method: "POST" });
+      if (!response.ok) {
+        throw new Error("Unable to log out");
+      }
+
+      updateTeacherUI(false);
+      await fetchActivities();
+    } catch (error) {
+      loginStatus.textContent = "Unable to log out. Please try again.";
+      loginStatus.className = "login-status error";
+      console.error("Error logging out:", error);
+    }
+  });
 
   // Handle form submission
   signupForm.addEventListener("submit", async (event) => {
@@ -155,6 +239,26 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Initialize app
-  fetchActivities();
+  async function initializeApp() {
+    try {
+      const response = await fetch("/auth/me");
+      const result = await response.json();
+
+      if (response.ok) {
+        updateTeacherUI(result.authenticated);
+      } else if (response.status === 503) {
+        loginStatus.textContent = result.detail;
+        loginStatus.className = "login-status error";
+      }
+    } catch (error) {
+      loginStatus.textContent =
+        "Unable to verify teacher access. Please refresh the page.";
+      loginStatus.className = "login-status error";
+      console.error("Error checking teacher access:", error);
+    }
+
+    await fetchActivities();
+  }
+
+  initializeApp();
 });
